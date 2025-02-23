@@ -1,10 +1,10 @@
 package main
 
 import (
-	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/google/uuid"
@@ -47,9 +47,19 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	data, err := io.ReadAll(file)
+	assetPath := getAssetPath(videoID, mediaType)
+	diskPath := cfg.getAssestDiskPath(assetPath)
+
+	dst, err := os.Create(diskPath)
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Unable to read video", err)
+		respondWithError(w, http.StatusInternalServerError, "error creating new file", err)
+		return
+	}
+	defer dst.Close()
+
+	_, err = io.Copy(dst, file)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "error copying file", err)
 		return
 	}
 
@@ -62,8 +72,8 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		respondWithError(w, http.StatusUnauthorized, "user is not video owner", err)
 		return
 	}
-	encoding := base64.StdEncoding.EncodeToString(data)
-	url := fmt.Sprintf("data:%s;base64,%s", mediaType, encoding)
+
+	url := cfg.getAssestURL(assetPath)
 	video.ThumbnailURL = &url
 
 	err = cfg.db.UpdateVideo(video)

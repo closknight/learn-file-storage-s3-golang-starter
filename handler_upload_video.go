@@ -1,13 +1,12 @@
 package main
 
 import (
-	"context"
-	"fmt"
 	"io"
 	"mime"
 	"net/http"
 	"os"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/google/uuid"
@@ -27,16 +26,15 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 
 	token, err := auth.GetBearerToken(r.Header)
 	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "could not find JWT", err)
+		respondWithError(w, http.StatusUnauthorized, "could not find JWT", err)
 		return
 	}
 
 	userID, err := auth.ValidateJWT(token, cfg.jwtSecret)
 	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "could not validate JWT", err)
+		respondWithError(w, http.StatusUnauthorized, "could not validate JWT", err)
 		return
 	}
-	fmt.Println("uploading video", videoID, "by user", userID)
 
 	video, err := cfg.db.GetVideo(videoID)
 	if err != nil {
@@ -50,7 +48,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 
 	file, header, err := r.FormFile("video")
 	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "video file not found", err)
+		respondWithError(w, http.StatusBadRequest, "could not parse form file", err)
 		return
 	}
 	defer file.Close()
@@ -86,12 +84,12 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	videoName := getAssetPath(mediaType)
+	key := getAssetPath(mediaType)
 
-	_, err = cfg.s3Client.PutObject(context.Background(), &s3.PutObjectInput{
-		Bucket:      &cfg.s3Bucket,
-		ContentType: &mediaType,
-		Key:         &videoName,
+	_, err = cfg.s3Client.PutObject(r.Context(), &s3.PutObjectInput{
+		Bucket:      aws.String(cfg.s3Bucket),
+		ContentType: aws.String(mediaType),
+		Key:         aws.String(key),
 		Body:        tempFile,
 	})
 
@@ -99,7 +97,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusInternalServerError, "unable to save to s3", err)
 		return
 	}
-	videoURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", cfg.s3Bucket, cfg.s3Region, videoName)
+	videoURL := cfg.getObjectURL(key)
 	video.VideoURL = &videoURL
 
 	err = cfg.db.UpdateVideo(video)
